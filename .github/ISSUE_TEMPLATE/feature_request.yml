@@ -1,0 +1,50 @@
+name: An idea or a request
+description: Something the app should do, or do differently.
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas from people who debate are the most useful kind. Plain words are fine.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the situation, not the solution. When does it come up? In a round, or while prepping?
+      placeholder: "Example: In the 1AR I need to see which 2AC answers the block dropped, without scrolling."
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: How you imagine it working. A sketch or photo is welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: now
+    attributes:
+      label: What do you do today instead?
+      description: Paper, another app, a workaround in this one?
+  - type: dropdown
+    id: when
+    attributes:
+      label: Where would this be used?
+      options:
+        - In a round
+        - Before a round (prep)
+        - Both
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Two things this app will not do
+      description: Please confirm your idea fits.
+      options:
+        - label: It does not use AI during a round.
+          required: true
+        - label: It does not change the words of a piece of evidence.
+          required: true

@@ -1,0 +1,47 @@
+# Runs on every push and pull request: type-check, unit tests, build the
+# single-file HTML app, then drive it in a real browser.
+# Linux only, so it is cheap (a few minutes) on a private repository.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['v*'] # tags are handled by release.yml, which runs these same tests first
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Type-check
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Build the single-file HTML app
+        run: npm run build:html
+      - name: Build the desktop web bundle
+        run: npm run build
+      - name: Install the test browser
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests (opens the built file like a USB copy would)
+        run: npm run e2e -- --trace off
+      - name: Upload the HTML app
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-debate-html
+          path: dist-html/policy-debate.html
+          if-no-files-found: error

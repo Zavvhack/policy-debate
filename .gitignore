@@ -1,0 +1,59 @@
+# --- Build output and dependencies ---
+node_modules/
+dist/
+dist-html/
+release/
+src-tauri/target/
+src-tauri/gen/
+*.tsbuildinfo
+
+# --- Test output ---
+test-results/
+playwright-report/
+blob-report/
+coverage/
+
+# --- Secrets: never commit these ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+id_rsa*
+id_ed25519*
+secrets.*
+*api-key*
+*apikey*
+
+# --- Your own debate data: keep it out of the public repository ---
+# Backups and exports made by the app
+policy-debate-backup*
+backups/
+# Evidence files, speech docs and articles you may drop here while testing.
+# (Nothing in the app needs a .docx or .pdf to be in the repository.)
+*.docx
+*.doc
+*.pdf
+*.xlsx
+my-data/
+private/
+
+# --- Editors and operating systems ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+.directory
+
+# --- Logs and temporary files ---
+*.log
+*.tmp
+.cache/

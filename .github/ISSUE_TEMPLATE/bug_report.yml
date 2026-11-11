@@ -1,0 +1,101 @@
+name: Something is not working
+description: The app did something wrong, lost something, or showed an error.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for telling us. You do not need to know anything about programming to fill this in.
+        **Please do not paste real evidence files, anyone's name, or an API key.**
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you see? If there was an error message, copy its words here.
+      placeholder: "Example: I pressed Tab in the flow and the new cell appeared in the wrong column."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we make it happen again?
+      description: List what you clicked or typed, one step per line. If you are not sure, say what you were doing at the time.
+      placeholder: |
+        1. Start a round as Negative
+        2. Add a DA sheet
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did it happen?
+      options:
+        - In a round (flow, timers, docs, CX notes)
+        - Card cutter or Library
+        - Blocks or Topicality
+        - Rebuttal practice or Scouting
+        - Settings or backups
+        - Installing or opening the app
+        - An AI feature
+        - Somewhere else
+    validations:
+      required: true
+  - type: dropdown
+    id: form
+    attributes:
+      label: Which form of the app?
+      options:
+        - Desktop app (installed)
+        - Browser version (the .html file)
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: What kind of computer?
+      options:
+        - Windows 11
+        - Windows 10
+        - Mac
+        - Chromebook
+        - "Linux: Fedora or Nobara"
+        - "Linux: Ubuntu, Debian or Mint"
+        - "Linux: Arch"
+        - "Linux: another kind"
+        - I am not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: "Open Settings and scroll to About. It says something like: Policy Debate 1.0.0"
+      placeholder: "1.0.0"
+  - type: input
+    id: browser
+    attributes:
+      label: Browser (browser version only)
+      placeholder: "Example: Chrome, Firefox, Safari, Edge"
+  - type: dropdown
+    id: lost-work
+    attributes:
+      label: Did you lose any work?
+      options:
+        - "No"
+        - "Yes"
+        - I am not sure
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: A screenshot helps a lot (drag it into this box). If the app showed "Details for a bug report", paste them here.

@@ -1,0 +1,39 @@
+[package]
+name = "policy-debate"
+version = "1.0.0"
+description = "Policy Debate: prep and in-round tools for policy debaters"
+edition = "2021"
+publish = false
+
+[lib]
+name = "policy_debate_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+# HTTP for two jobs only: fetching an article you asked for, and AI requests.
+# rustls means no dependency on the system's OpenSSL, which keeps Linux builds portable.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "stream"] }
+futures-util = "0.3"
+url = "2"
+# Opens links (openCaselist, Tabroom, sources) in the normal browser.
+open = "5"
+tokio = { version = "1", features = ["rt"] }
+# The operating system's keychain: Secret Service / KWallet on Linux,
+# Credential Manager on Windows, Keychain on macOS.
+keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "tokio", "crypto-rust"] }
+
+[profile.release]
+# Smaller, faster release builds.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

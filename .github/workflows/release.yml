@@ -1,0 +1,282 @@
+# Builds the installers and the single-file HTML app.
+#
+# Runs when:
+#   - you push a tag like v1.0.0          -> builds everything and publishes a Release
+#   - you press "Run workflow" on GitHub  -> builds what you choose; download from the run page
+#   - a commit message on a claude/ branch contains [build linux] or [build all]
+#     (used while developing, to test the pipeline without making a release)
+#
+# COST: on a private repository GitHub Actions minutes are metered, and macOS
+# and Windows minutes are charged at a higher rate than Linux. A full build is
+# three platforms. Linux-only builds are cheap. Public repositories build free.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+    branches: ['claude/**']
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Which installers to build
+        type: choice
+        default: all
+        options: [all, linux, windows, macos]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Decide what to build. On an ordinary branch push with no [build ...] marker, nothing.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      platforms: ${{ steps.decide.outputs.platforms }}
+      matrix: ${{ steps.decide.outputs.matrix }}
+    steps:
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          CHOICE: ${{ inputs.platforms }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          platforms=none
+          if [ "$REF_TYPE" = "tag" ]; then platforms=all
+          elif [ "$EVENT" = "workflow_dispatch" ]; then platforms="$CHOICE"
+          elif printf '%s' "$MESSAGE" | grep -q '\[build all\]'; then platforms=all
+          elif printf '%s' "$MESSAGE" | grep -q '\[build linux\]'; then platforms=linux
+          elif printf '%s' "$MESSAGE" | grep -q '\[build windows\]'; then platforms=windows
+          elif printf '%s' "$MESSAGE" | grep -q '\[build macos\]'; then platforms=macos
+          fi
+          # The oldest Ubuntu GitHub offers, so the Linux build also runs on older systems.
+          linux='{"platform":"linux","os":"ubuntu-22.04","args":""}'
+          windows='{"platform":"windows","os":"windows-latest","args":""}'
+          # One .dmg that runs on both Apple Silicon and Intel Macs.
+          # An explicit image name: "macos-latest" was never given a runner in testing.
+          macos='{"platform":"macos","os":"macos-15","args":"--target universal-apple-darwin"}'
+          case "$platforms" in
+            all) list="$linux,$windows,$macos" ;;
+            linux) list="$linux" ;;
+            windows) list="$windows" ;;
+            macos) list="$macos" ;;
+            *) list="" ;;
+          esac
+          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
+          echo "matrix={\"include\":[$list]}" >> "$GITHUB_OUTPUT"
+          echo "Building: $platforms"
+
+  # Tests first: nothing is built for release unless they pass.
+  test:
+    needs: plan
+    if: needs.plan.outputs.platforms != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Use the tag as the version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build:html
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e -- --trace off
+      # The file keeps the SAME name in every release, on purpose. Some browsers tie
+      # saved work to the file's exact name and folder, so replacing the old file
+      # with the new one must not change its name. The version is shown inside the
+      # app (Settings, About).
+      - name: Collect the HTML file
+        shell: bash
+        run: |
+          mkdir -p release
+          cp dist-html/policy-debate.html release/policy-debate.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: html
+          path: release/*
+          if-no-files-found: error
+
+  # Only the platforms chosen in "plan" get a job, so nothing else uses up minutes.
+  desktop:
+    needs: [plan, test]
+    if: needs.plan.outputs.platforms != 'none'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: Build for ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux build libraries
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential file libxdo-dev libssl-dev librsvg2-dev patchelf rpm xvfb webkit2gtk-driver
+      - run: npm ci
+      - name: Use the tag as the version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+      - name: Rust tests
+        if: matrix.platform == 'linux'
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Build the installers
+        run: npx tauri build ${{ matrix.args }}
+        env:
+          # Lets the AppImage tool run on the build server.
+          NO_STRIP: 'true'
+      - name: Drive the real desktop app (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          cargo install tauri-driver --locked
+          xvfb-run -a node tests/desktop/smoke.mjs src-tauri/target/release/policy-debate
+      - name: Collect the installers
+        run: node scripts/collect-artifacts.mjs ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: release/*
+          if-no-files-found: error
+
+  # Install each Linux package on the kind of system it is for, and start it.
+  linux-distros:
+    needs: [plan, desktop]
+    # Runs even if another platform's build failed: it only needs the Linux packages
+    # (if those are missing, the download step fails and says so).
+    if: always() && needs.desktop.result != 'skipped' && (needs.plan.outputs.platforms == 'all' || needs.plan.outputs.platforms == 'linux')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Fedora (.rpm)
+            image: fedora:latest
+            # Fedora's mirrors sometimes stall: give each attempt 4 minutes, and try three times.
+            setup: for i in 1 2 3; do timeout 240 dnf install -y --setopt=timeout=20 --setopt=retries=5 xorg-x11-server-Xvfb xwininfo mesa-dri-drivers ./pkg/*.rpm && break; [ "$i" = 3 ] && exit 1; dnf clean all; done
+            run: policy-debate
+          - name: Ubuntu 24.04 (.deb)
+            image: ubuntu:24.04
+            setup: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb x11-utils && DEBIAN_FRONTEND=noninteractive apt-get install -y ./pkg/*.deb
+            run: policy-debate
+          - name: Debian 12 (.deb)
+            image: debian:12
+            setup: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb x11-utils && DEBIAN_FRONTEND=noninteractive apt-get install -y ./pkg/*.deb
+            run: policy-debate
+          - name: Arch (AppImage)
+            image: archlinux:latest
+            setup: pacman -Syu --noconfirm xorg-server-xvfb xorg-xwininfo mesa gtk3 && chmod +x pkg/*.AppImage && ./pkg/*.AppImage --appimage-extract >/dev/null
+            run: ./squashfs-root/AppRun
+    name: Check on ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: ${{ matrix.image }}
+      # WebKit starts its page process in a sandbox that needs these inside a container.
+      options: --security-opt seccomp=unconfined --cap-add SYS_ADMIN
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: pkg
+      - name: Install the package and what it depends on
+        run: ${{ matrix.setup }}
+      - name: Start the app
+        run: bash tests/desktop/launch-check.sh ${{ matrix.run }}
+
+  # On a tag: publish everything to the Releases page.
+  # Publishes whatever was built, as long as the tests passed. If a platform is
+  # missing (for example no Mac runner was available), the notes say so, and the
+  # workflow can be re-run for that platform later.
+  publish:
+    needs: [test, desktop, linux-distros]
+    if: always() && github.ref_type == 'tag' && needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The release notes come from CHANGELOG.md.
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Write checksums and notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          (cd release && sha256sum * > SHA256SUMS.txt)
+          # Everything under this version's heading in CHANGELOG.md, up to the next version.
+          awk -v v="$version" '
+            /^## / { if (found) exit; if ($2 == v) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > changes.md
+          {
+            echo "## Which file do I want?"
+            echo
+            echo "| You have | Download |"
+            echo "|---|---|"
+            echo "| Windows 10 or 11 | the \`-setup.exe\` (or the \`.msi\`) |"
+            echo "| A Mac (Apple Silicon or Intel) | the \`.dmg\` |"
+            echo "| A Chromebook, or any computer you cannot install on | \`policy-debate.html\` (open it in a browser) |"
+            echo "| Linux: Fedora, Nobara, openSUSE | the \`.rpm\` |"
+            echo "| Linux: Ubuntu, Debian, Mint, Pop!_OS | the \`.deb\` |"
+            echo "| Linux: Arch, or anything else | the \`.AppImage\` |"
+            echo
+            echo "Windows and macOS warn the first time you open the app, because it is not code-signed. That is expected. The [README](https://github.com/${GITHUB_REPOSITORY}#download) shows how to open it, step by step."
+            echo
+            echo "**Updating the browser version?** Download a backup first (Settings → Backup), then save the new \`policy-debate.html\` over the old one, in the same folder."
+            echo
+            echo "\`SHA256SUMS.txt\` lets you check that a download arrived intact."
+            echo
+            if [ -s changes.md ] && grep -q '[^[:space:]]' changes.md; then
+              echo "## What is in version ${version}"
+              cat changes.md
+            else
+              echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md) for what changed."
+            fi
+          } > notes.md
+          missing=""
+          ls release/*.rpm >/dev/null 2>&1 || missing="$missing Linux,"
+          ls release/*.msi >/dev/null 2>&1 || missing="$missing Windows,"
+          ls release/*.dmg >/dev/null 2>&1 || missing="$missing macOS,"
+          ls release/*.html >/dev/null 2>&1 || missing="$missing the browser version,"
+          if [ -n "$missing" ]; then
+            printf '\n**Not included in this release:**%s (that build failed or did not run; see the Actions tab).\n' "${missing%,}" >> notes.md
+          fi
+          cat notes.md
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # If the tag was made with GitHub's "Draft a new release" page, the
+          # release already exists: add the files to it instead of failing.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" release/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Policy Debate ${GITHUB_REF_NAME#v}" \
+              --notes-file notes.md
+          fi

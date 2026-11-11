@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window may use Tauri's core features. The app's own commands (see src/lib.rs) are the only way it can reach the keychain, the network, or the disk.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

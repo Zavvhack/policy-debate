@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card Cutter</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f2ee; --panel:#fff; --ink:#1d1d1f; --mute:#6b6b70; --line:#e2dfd8;
+    --neg:#ff9e9e; --aff:#8fd3ff; --accent:#1d1d1f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:18px 20px 6px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  header h1{margin:0;font-size:22px;letter-spacing:-.01em}
+  header span{color:var(--mute);font-size:13px}
+  main{display:grid;grid-template-columns:minmax(300px,440px) 1fr;gap:16px;padding:12px 20px 40px;max-width:1300px}
+  @media (max-width:860px){main{grid-template-columns:1fr;padding:10px 12px 40px}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+  label{display:block;font-size:12px;font-weight:600;color:var(--mute);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.04em}
+  input[type=text],input[type=url],textarea,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:9px;font:inherit;background:#fbfaf8;color:var(--ink)}
+  textarea{resize:vertical}
+  .row{display:flex;gap:8px}
+  .row>*{flex:1}
+  .side{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .side button{flex:1;padding:10px;border:0;background:#fbfaf8;font:inherit;font-weight:600;cursor:pointer;color:var(--mute)}
+  .side button.on[data-side=neg]{background:var(--neg);color:#000}
+  .side button.on[data-side=aff]{background:var(--aff);color:#000}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 14px;border-radius:10px;border:1px solid var(--accent);background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+  .btn:disabled{opacity:.45;cursor:default}
+  .btn.full{width:100%;margin-top:16px}
+  details{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}
+  summary{cursor:pointer;font-weight:600;font-size:14px}
+  .hint{font-size:12.5px;color:var(--mute);margin-top:6px}
+  .err{background:#fff1f0;border:1px solid #f3c2bd;color:#8a1f11;border-radius:10px;padding:10px 12px;margin-top:12px;font-size:14px;display:none}
+  .status{font-size:13px;color:var(--mute);margin-top:10px;min-height:18px}
+  .toolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .toolbar .lv{padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:#fbfaf8;font:inherit;font-size:13px;cursor:pointer}
+  .toolbar .sep{flex:1}
+  .stats{font-size:13px;color:var(--mute)}
+  /* card preview: mirrors the file's formatting */
+  .card{font-family:Calibri,Carlito,"Segoe UI",Arial,sans-serif;color:#000;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+  .card .tag{font-size:13pt;font-weight:700;margin:0 0 2px;outline:none}
+  .card .tag u{text-decoration:underline}
+  .card .cite{font-size:11pt;margin:0 0 10px;outline:none}
+  .card .cite b{font-size:13pt}
+  .card .body p{margin:0 0 8px}
+  .t{cursor:pointer;border-radius:1px}
+  .lv0{font-size:var(--unread,7pt)}
+  .lv1{font-size:11pt;text-decoration:underline}
+  .lv2{font-size:11pt;text-decoration:underline}
+  .lv3{font-size:11pt;text-decoration:underline;font-weight:700}
+  .cardhead{display:flex;justify-content:space-between;align-items:center;font:12px/1 -apple-system,sans-serif;color:var(--mute);margin-bottom:8px}
+  .chip{display:inline-block;padding:3px 8px;border-radius:99px;font-weight:700;color:#000}
+  .empty{color:var(--mute);text-align:center;padding:40px 10px}
+  .warn{background:#fff8e6;border:1px solid #f0dca8;border-radius:10px;padding:10px 12px;font-size:13.5px;margin-bottom:12px}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#1d1d1f;color:#fff;padding:9px 14px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none}
+  .toast.show{opacity:1}
+  .colorrow{display:flex;gap:8px;align-items:center}
+  .colorrow input[type=color]{width:42px;height:34px;border:1px solid var(--line);border-radius:8px;padding:2px;background:#fff}
+</style>
+</head>
+<body>
+<header>
+  <h1>Card Cutter</h1>
+  <span>Paste an article → Claude cuts the card → you fix the highlighting → copy to Google Docs or download .docx</span>
+</header>
+<main>
+  <section class="panel" id="inputPanel">
+    <label>Side</label>
+    <div class="side" id="sideToggle">
+      <button data-side="neg" class="on">Neg</button>
+      <button data-side="aff">Aff</button>
+    </div>
+
+    <label for="src">Article text</label>
+    <textarea id="src" rows="10" placeholder="Paste the article. Including the byline, date and publication at the top lets Claude fill in the cite."></textarea>
+
+    <label for="url">Link (for the cite)</label>
+    <input type="url" id="url" placeholder="https://…">
+
+    <label for="claim">What should the card prove? (optional)</label>
+    <input type="text" id="claim" placeholder="e.g. single payer causes doctor shortages">
+
+    <label for="tagIn">Your tag (optional — leave blank and Claude writes one)</label>
+    <input type="text" id="tagIn" placeholder="">
+
+    <details>
+      <summary>Cite details (optional — overrides what Claude finds)</summary>
+      <div class="row"><div><label>Author first</label><input type="text" id="cFirst"></div><div><label>Author last</label><input type="text" id="cLast"></div></div>
+      <div class="row"><div><label>Year</label><input type="text" id="cYear" placeholder="2026"></div><div><label>Date</label><input type="text" id="cDate" placeholder="1/28"></div></div>
+      <label>Qualifications</label><input type="text" id="cQuals">
+      <label>Article title</label><input type="text" id="cTitle">
+      <label>Publication</label><input type="text" id="cPub">
+    </details>
+
+    <details>
+      <summary>Settings</summary>
+      <label for="density">Highlighting amount</label>
+      <select id="density">
+        <option value="light">Light (fast read, ~15–25% of card)</option>
+        <option value="medium" selected>Medium (~25–40%)</option>
+        <option value="heavy">Heavy (~40–55%)</option>
+      </select>
+      <label for="initials">Your initials (end of cite, like //DH)</label>
+      <input type="text" id="initials" placeholder="AB">
+      <label for="unread">Unread text size</label>
+      <select id="unread"><option>6</option><option selected>7</option><option>8</option></select>
+      <label>Highlight colors</label>
+      <select id="colorMode">
+        <option value="custom" selected>Soft custom colors (easiest to read; best for Google Docs)</option>
+        <option value="word">Word highlighter colors (works with Verbatim tools)</option>
+      </select>
+      <div id="customColors">
+        <div class="colorrow" style="margin-top:8px"><input type="color" id="negColor" value="#ff9e9e"><span>Neg</span><input type="color" id="affColor" value="#8fd3ff"><span>Aff</span></div>
+      </div>
+      <div id="wordColors" style="display:none">
+        <div class="row" style="margin-top:8px">
+          <div><label>Neg</label><select id="negWord"></select></div>
+          <div><label>Aff</label><select id="affWord"></select></div>
+        </div>
+        <div class="hint">Word's "Blue" highlighter is too dark to read black text through, so Cyan is the default for aff.</div>
+      </div>
+      <label for="tier">Model</label>
+      <select id="tier">
+        <option value="default" selected>Default</option>
+        <option value="complex">Strongest (slower, better picks)</option>
+        <option value="quick">Quick</option>
+      </select>
+    </details>
+
+    <button class="btn full" id="cutBtn">Cut card</button>
+    <div class="status" id="status"></div>
+    <div class="err" id="err"></div>
+  </section>
+
+  <section class="panel" id="outPanel">
+    <div class="toolbar">
+      <button class="lv" data-lv="0" title="Unread (small)">Small</button>
+      <button class="lv" data-lv="1" title="Underline">Underline</button>
+      <button class="lv" data-lv="2" title="Highlight">Highlight</button>
+      <button class="lv" data-lv="3" title="Highlight + bold">Emphasis</button>
+      <span class="sep"></span>
+      <button class="btn ghost" id="copyAll" disabled>Copy all</button>
+      <button class="btn" id="dlDocx" disabled>Download .docx</button>
+    </div>
+    <div class="hint" style="margin:-4px 0 12px">Tap a word to change its level (small → underline → highlight → emphasis), or select text and press a button above. The tag and cite are editable too.</div>
+    <div id="cards"><div class="empty">Your cut cards show up here.</div></div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const WORD_HL = {yellow:'FFFF00',green:'00FF00',cyan:'00FFFF',magenta:'FF00FF',red:'FF0000',blue:'0000FF',lightGray:'C0C0C0',darkYellow:'808000'};
+  const WORD_LABEL = {yellow:'Yellow',green:'Bright green',cyan:'Cyan (light blue)',magenta:'Pink (magenta)',red:'Red',blue:'Blue (too dark)',lightGray:'Light gray',darkYellow:'Dark yellow'};
+  for (const sel of [$('negWord'), $('affWord')]) for (const k in WORD_HL) { const o=document.createElement('option'); o.value=k; o.textContent=WORD_LABEL[k]; sel.appendChild(o); }
+  $('negWord').value='red'; $('affWord').value='cyan';
+
+  // ---------- settings persistence (best effort) ----------
+  const SKEYS=['density','initials','unread','colorMode','negColor','affColor','negWord','affWord','tier'];
+  const store = { get(k){try{return localStorage.getItem('cc.'+k)}catch(e){return null}}, set(k,v){try{localStorage.setItem('cc.'+k,v)}catch(e){}} };
+  for (const k of SKEYS){ const v=store.get(k); if(v!==null) $(k).value=v; $(k).addEventListener('change',()=>{store.set(k,$(k).value);applyColors();}); }
+  let side = store.get('side')||'neg';
+  function setSide(s){ side=s; store.set('side',s); document.querySelectorAll('#sideToggle button').forEach(b=>b.classList.toggle('on',b.dataset.side===s)); }
+  document.querySelectorAll('#sideToggle button').forEach(b=>b.onclick=()=>setSide(b.dataset.side));
+  setSide(side);
+
+  function hlHex(s){ return $('colorMode').value==='word' ? '#'+WORD_HL[$(s==='neg'?'negWord':'affWord').value] : $(s==='neg'?'negColor':'affColor').value; }
+  function applyColors(){
+    const word=$('colorMode').value==='word';
+    $('customColors').style.display=word?'none':''; $('wordColors').style.display=word?'':'none';
+    document.documentElement.style.setProperty('--neg',hlHex('neg'));
+    document.documentElement.style.setProperty('--aff',hlHex('aff'));
+    document.documentElement.style.setProperty('--unread',$('unread').value+'pt');
+    renderAll();
+  }
+
+  // ---------- state ----------
+  let cards = []; // {id, side, tag:[{t,u}], cite:{...}, tokens:[{t,lv}]}
+  try { const saved=JSON.parse(localStorage.getItem('cc.cards')||'[]'); if(Array.isArray(saved)) cards=saved; } catch(e){}
+  const save = () => { try{localStorage.setItem('cc.cards',JSON.stringify(cards))}catch(e){} };
+
+  // ---------- text fidelity: normalize + map back to the original ----------
+  const QMAP = {'‘':"'",'’':"'",'‚':"'",'‛':"'",'“':'"','”':'"','„':'"','–':'-','—':'-','−':'-',' ':' '};
+  function normChar(c){ return QMAP[c]||c; }
+  function normalizeWithMap(s){
+    const out=[], map=[];
+    for (let i=0;i<s.length;i++){
+      let c=normChar(s[i]);
+      if (/\s/.test(c)) { if(out.length && out[out.length-1]!==' '){ out.push(' '); map.push(i);} continue; }
+      out.push(c); map.push(i);
+    }
+    while(out.length && out[out.length-1]===' '){out.pop();map.pop();}
+    return {str:out.join(''), map};
+  }
+  // segments from Claude: [{t, f}] f in n,u,h,e. Returns tokens with ORIGINAL source text, or null if text was altered.
+  function verifyAndMap(source, segments){
+    const LV={n:0,u:1,h:2,e:3};
+    const src=normalizeWithMap(source);
+    // normalize the concatenated card while remembering which segment each char came from
+    const chars=[], lvs=[];
+    for (const seg of segments){
+      const lv = LV[seg.f] ?? 0;
+      for (const ch of String(seg.t||'')){
+        let c=normChar(ch);
+        if (/\s/.test(c)){ if(chars.length && chars[chars.length-1]!==' '){chars.push(' ');lvs.push(lv);} continue; }
+        chars.push(c); lvs.push(lv);
+      }
+    }
+    while(chars.length && chars[chars.length-1]===' '){chars.pop();lvs.pop();}
+    const card=chars.join('');
+    if (card.length<20) return null;
+    const at = src.str.indexOf(card);
+    if (at<0) return null;
+    const start=src.map[at], end=src.map[at+card.length-1]+1;
+    // per original char level
+    const perChar=new Array(end-start).fill(0);
+    let k=0, cur=lvs[0];
+    for (let i=start;i<end;i++){
+      if (k<card.length && src.map[at+k]===i){ cur=lvs[k]; k++; }
+      perChar[i-start]=cur;
+    }
+    const text=source.slice(start,end);
+    return toTokens(text, perChar);
+  }
+  function toTokens(text, perChar){
+    // split into runs by level, then by whitespace so words are clickable
+    const tokens=[]; let buf='', blv=null, bws=null;
+    const flush=()=>{ if(buf){ tokens.push({t:buf, lv:bws?-1:blv}); buf=''; } };
+    for (let i=0;i<text.length;i++){
+      const c=text[i], ws=/\s/.test(c), lv=perChar[i];
+      if (buf && (ws!==bws || (!ws && lv!==blv))) flush();
+      if(!buf){ blv=lv; bws=ws; }
+      buf+=c;
+    }
+    flush();
+    return tokens;
+  }
+
+  // ---------- Claude ----------
+  let samplePromise = null;
+  const getSample = () => (samplePromise ||= (window.claude ? claude.use('sample') : Promise.resolve(null)));
+  getSample().then(s=>{ if(!s){ $('cutBtn').disabled=true; showErr('Claude is not available in this view. Open the page on claude.ai to cut cards.'); } });
+
+  function buildPrompt(source, strict){
+    const density={light:'about 15-25% of the words in the card',medium:'about 25-40% of the words in the card',heavy:'about 40-55% of the words in the card'}[$('density').value];
+    const claim=$('claim').value.trim(), tag=$('tagIn').value.trim();
+    return `You are an expert high school policy debater cutting an evidence card for the ${side==='neg'?'NEGATIVE':'AFFIRMATIVE'}.
+
+ARTICLE (verbatim, may include byline/header text):
+<<<ARTICLE
+${source}
+ARTICLE>>>
+${claim?`\nThe debater wants this card to prove: ${claim}\n`:''}${tag?`\nThe debater's tag (use it as written, you may only add underline markup): ${tag}\n`:''}
+TASK
+1. Choose the single best contiguous excerpt for the card: usually 1-4 full paragraphs. Start and end at sentence boundaries; include enough surrounding context that the card is not cut out of context.
+2. Mark every part of the excerpt with one level:
+   n = unread context (will be shrunk)
+   u = underlined: important text, not read aloud
+   h = highlighted: the words the debater reads aloud
+   e = emphasis: highlighted AND bold, for the 1-4 most important phrases (impacts, warrants, numbers)
+   Highlight ${density}. Highlighted words read alone, in order, must form grammatical, persuasive sentences. Highlighted text must always also be underlined text (h and e are underlined automatically). You may split inside a word (e.g. "health" h + "care" u) to make the read version flow.
+3. Write a tag: one punchy sentence in debate style making the claim the card supports, never overclaiming what the evidence says. Wrap the 1-3 key phrases of the tag in [[double brackets]] to underline them.
+4. Extract cite info from the article header if present (do not invent anything; use "" when unknown).
+
+ABSOLUTE RULE: the concatenation of all "t" values in "card" must reproduce the excerpt EXACTLY, character for character, as it appears in the article: same words, same punctuation, same order. Never fix typos, never add, remove, paraphrase, or reorder words, never insert ellipses. ${strict?'Your previous attempt changed the article text. Copy it exactly this time.':''}
+
+Return ONLY JSON:
+{"tag":"...","cite":{"first":"","last":"","year":"YYYY","date":"M/D","quals":"author credentials","title":"article title","publication":""},"card":[{"t":"text","f":"n"},{"t":"text","f":"h"}]}`;
+  }
+
+  async function cut(){
+    hideErr();
+    const source=$('src').value;
+    if (source.trim().length<80){ showErr('Paste more of the article first.'); return; }
+    const sample=await getSample(); if(!sample) return;
+    $('cutBtn').disabled=true;
+    let tokens=null, res=null;
+    try{
+      for (let attempt=0; attempt<2 && !tokens; attempt++){
+        status(attempt? 'Claude changed some wording; re-cutting with the exact text…' : 'Cutting the card…');
+        res = await sample.json(buildPrompt(source, attempt>0), {modelTier:$('tier').value});
+        if (!res || !Array.isArray(res.card)) continue;
+        tokens = verifyAndMap(source, res.card);
+      }
+    } catch(e){
+      status('');
+      $('cutBtn').disabled=false;
+      if (e && e.code==='not_granted') showErr('Claude access was not allowed for this page.');
+      else if (e && e.code==='rate_limited') showErr('Too many requests right now. Wait a minute and try again.');
+      else showErr('Something went wrong: '+(e&&e.message||e));
+      return;
+    }
+    $('cutBtn').disabled=false; status('');
+    if (!tokens){ showErr("Claude's version didn't match the article word for word, so it was thrown out (so nothing altered ends up in your card). Try again, or paste less text."); return; }
+    const c=res.cite||{};
+    const ov=id=>$(id).value.trim();
+    const card={
+      id:Date.now().toString(36), side,
+      tag: parseTag($('tagIn').value.trim() ? mergeTag($('tagIn').value.trim(), res.tag) : (res.tag||'')),
+      cite:{ first:ov('cFirst')||c.first||'', last:ov('cLast')||c.last||'', year:ov('cYear')||c.year||'', date:ov('cDate')||c.date||'', quals:ov('cQuals')||c.quals||'', title:ov('cTitle')||c.title||'', pub:ov('cPub')||c.publication||'', url:$('url').value.trim(), initials:$('initials').value.trim() },
+      tokens
+    };
+    cards.unshift(card); save(); renderAll();
+    toast('Card cut — check the highlighting');
+  }
+  function mergeTag(userTag, claudeTag){
+    // keep the user's words; accept Claude's [[ ]] markup only if the plain text matches
+    const plain=(claudeTag||'').replace(/\[\[|\]\]/g,'');
+    return plain.trim()===userTag ? claudeTag : userTag;
+  }
+  function parseTag(s){
+    const parts=[]; const re=/\[\[(.+?)\]\]/g; let last=0,m;
+    while((m=re.exec(s))){ if(m.index>last) parts.push({t:s.slice(last,m.index),u:false}); parts.push({t:m[1],u:true}); last=re.lastIndex; }
+    if(last<s.length) parts.push({t:s.slice(last),u:false});
+    return parts;
+  }
+
+  // ---------- rendering ----------
+  const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function wsLevel(tokens,i){ // whitespace takes the lower of its neighbours' levels
+    let a=null,b=null;
+    for(let j=i-1;j>=0;j--) if(tokens[j].lv>=0){a=tokens[j].lv;break;}
+    for(let j=i+1;j<tokens.length;j++) if(tokens[j].lv>=0){b=tokens[j].lv;break;}
+    if(a===null) return b??0; if(b===null) return a; return Math.min(a,b);
+  }
+  function paragraphsOf(tokens){ // -> [[{t,lv}...], ...] with whitespace levels resolved
+    const paras=[[]];
+    tokens.forEach((tk,i)=>{
+      if(tk.lv<0){
+        if(/\n/.test(tk.t)){ paras.push([]); return; }
+        paras[paras.length-1].push({t:' ',lv:wsLevel(tokens,i)});
+      } else paras[paras.length-1].push({t:tk.t,lv:tk.lv});
+    });
+    return paras.filter(p=>p.length).map(p=>{ // merge adjacent same-level runs
+      const out=[]; for(const r of p){ const l=out[out.length-1]; if(l&&l.lv===r.lv) l.t+=r.t; else out.push({...r}); } return out;
+    });
+  }
+  function citeParts(c){
+    const yy=(c.year||'').slice(-2), yfront=(c.year||'').slice(0,-2);
+    const rest=[c.quals, c.title?`“${c.title}”`:'', c.pub, c.date, c.url].filter(Boolean).join(', ');
+    return {first:c.first, last:c.last, yfront, yy, rest:(rest?' – '+rest:'')+(c.initials?' //'+c.initials:'')};
+  }
+  function renderAll(){
+    const root=$('cards');
+    $('copyAll').disabled=$('dlDocx').disabled=!cards.length;
+    if(!cards.length){ root.innerHTML='<div class="empty">Your cut cards show up here.</div>'; return; }
+    root.innerHTML='';
+    cards.forEach((card,ci)=>{
+      const hl=hlHex(card.side);
+      const wrap=document.createElement('div');
+      const read=card.tokens.filter(t=>t.lv>=2).map(t=>t.t).join(' ').split(/\s+/).filter(Boolean).length;
+      wrap.innerHTML=`<div class="cardhead"><span><span class="chip" style="background:${hl}">${card.side.toUpperCase()}</span> &nbsp;${read} words read · ~${Math.max(1,Math.round(read/4.5))}s at speed</span>
+        <span><button class="btn ghost" data-act="copy" style="padding:5px 10px;font-size:13px">Copy</button> <button class="btn ghost" data-act="del" style="padding:5px 10px;font-size:13px">Delete</button></span></div>`;
+      const el=document.createElement('div'); el.className='card'; el.dataset.ci=ci;
+      const cp=citeParts(card.cite);
+      el.innerHTML=`<p class="tag" contenteditable="true">${card.tag.map(p=>p.u?`<u>${esc(p.t)}</u>`:esc(p.t)).join('')}</p>
+        <p class="cite" contenteditable="true">${esc(cp.first)} <b>${esc(cp.last)},</b> ${esc(cp.yfront)}<b>${esc(cp.yy)}</b>${esc(cp.rest)}</p>
+        <div class="body"></div>`;
+      const body=el.querySelector('.body');
+      // paragraphs with clickable tokens
+      let p=document.createElement('p'); body.appendChild(p);
+      card.tokens.forEach((tk,ti)=>{
+        if(tk.lv<0){
+          if(/\n/.test(tk.t)){ p=document.createElement('p'); body.appendChild(p); return; }
+          const s=document.createElement('span'); const lv=wsLevel(card.tokens,ti); s.className='lv'+lv; s.textContent=' ';
+          if(lv>=2) s.style.background=hl; p.appendChild(s); return;
+        }
+        const s=document.createElement('span'); s.className='t lv'+tk.lv; s.textContent=tk.t; s.dataset.ti=ti;
+        if(tk.lv>=2) s.style.background=hl;
+        p.appendChild(s);
+      });
+      el.querySelector('.tag').addEventListener('blur',e=>{ card.tag=htmlToTag(e.target); save(); });
+      el.querySelector('.cite').addEventListener('blur',e=>{ card.citeText=e.target.innerText; card.citeHTML=e.target.innerHTML; save(); });
+      if(card.citeHTML) el.querySelector('.cite').innerHTML=card.citeHTML;
+      body.addEventListener('click',e=>{
+        const t=e.target.closest('.t'); if(!t) return;
+        const sel=window.getSelection(); if(sel && !sel.isCollapsed) return;
+        const tk=card.tokens[+t.dataset.ti]; tk.lv=(tk.lv+1)%4; save(); renderAll();
+      });
+      wrap.appendChild(el);
+      wrap.querySelector('[data-act=copy]').onclick=()=>copyCards([card]);
+      wrap.querySelector('[data-act=del]').onclick=()=>{ cards.splice(ci,1); save(); renderAll(); };
+      root.appendChild(wrap);
+    });
+  }
+  function htmlToTag(node){
+    const parts=[]; node.childNodes.forEach(n=>{ const t=n.textContent; if(!t) return; parts.push({t,u:n.nodeName==='U'}); }); return parts;
+  }
+  // toolbar: apply level to selected words
+  document.querySelectorAll('.toolbar .lv').forEach(b=>{
+    b.addEventListener('mousedown',e=>e.preventDefault()); // keep the selection
+    b.onclick=()=>{
+      const sel=window.getSelection(); if(!sel||sel.isCollapsed){ toast('Select some card text first'); return; }
+      const lv=+b.dataset.lv; let changed=false;
+      document.querySelectorAll('.card .t').forEach(s=>{
+        if(sel.containsNode(s,true)){ const card=cards[+s.closest('.card').dataset.ci]; card.tokens[+s.dataset.ti].lv=lv; changed=true; }
+      });
+      if(changed){ sel.removeAllRanges(); save(); renderAll(); }
+    };
+  });
+
+  // ---------- export: rich HTML (Google Docs / Word paste) ----------
+  function cardHTML(card){
+    const hl=hlHex(card.side), un=$('unread').value;
+    const F='font-family:Calibri,sans-serif;';
+    const tag=card.tag.map(p=>p.u?`<u>${esc(p.t)}</u>`:esc(p.t)).join('');
+    const cp=citeParts(card.cite);
+    const cite=card.citeHTML ? card.citeHTML.replace(/<b>/g,'<b style="font-size:13pt">') :
+      `${esc(cp.first)} <b style="font-size:13pt">${esc(cp.last)},</b> ${esc(cp.yfront)}<b style="font-size:13pt">${esc(cp.yy)}</b>${esc(cp.rest)}`;
+    const style={0:`font-size:${un}pt;`,1:'font-size:11pt;text-decoration:underline;',2:`font-size:11pt;text-decoration:underline;background-color:${hl};`,3:`font-size:11pt;text-decoration:underline;font-weight:bold;background-color:${hl};`};
+    const body=paragraphsOf(card.tokens).map(p=>`<p style="${F}margin:0 0 8pt">${p.map(r=>`<span style="${style[r.lv]}">${esc(r.t)}</span>`).join('')}</p>`).join('');
+    return `<h4 style="${F}font-size:13pt;font-weight:bold;margin:0">${tag}</h4><p style="${F}font-size:11pt;margin:0 0 8pt">${cite}</p>${body}<p style="${F}"></p>`;
+  }
+  function cardPlain(card){
+    const cp=citeParts(card.cite);
+    return card.tag.map(p=>p.t).join('')+'\n'+(card.citeText||`${cp.first} ${cp.last}, ${cp.yfront}${cp.yy}${cp.rest}`)+'\n'+paragraphsOf(card.tokens).map(p=>p.map(r=>r.t).join('')).join('\n')+'\n';
+  }
+  async function copyCards(list){
+    const html=list.map(cardHTML).join(''), text=list.map(cardPlain).join('\n');
+    try{
+      await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([text],{type:'text/plain'})})]);
+      toast('Copied — paste into your doc'); return;
+    }catch(e){}
+    try{ // fallback: copy a rendered selection
+      const d=document.createElement('div'); d.innerHTML=html; d.style.cssText='position:fixed;left:-9999px;top:0'; document.body.appendChild(d);
+      const r=document.createRange(); r.selectNodeContents(d); const s=getSelection(); s.removeAllRanges(); s.addRange(r);
+      const ok=document.execCommand('copy'); s.removeAllRanges(); d.remove();
+      toast(ok?'Copied — paste into your doc':'Copy was blocked here; use Download .docx');
+    }catch(e){ toast('Copy was blocked here; use Download .docx'); }
+  }
+  $('copyAll').onclick=()=>copyCards(cards);
+
+  // ---------- export: .docx ----------
+  const x=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function run(t,{b,u,sz,hl}={}){
+    let pr='<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/>';
+    if(b) pr+='<w:b/><w:bCs/>'; if(u) pr+='<w:u w:val="single"/>';
+    if(hl){ pr+= hl.word ? `<w:highlight w:val="${hl.word}"/>` : `<w:shd w:val="clear" w:color="auto" w:fill="${hl.hex}"/>`; }
+    if(sz) pr+=`<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/>`;
+    return `<w:r><w:rPr>${pr}</w:rPr><w:t xml:space="preserve">${x(t)}</w:t></w:r>`;
+  }
+  function cardDocx(card){
+    const word=$('colorMode').value==='word';
+    const hl= word ? {word:$(card.side==='neg'?'negWord':'affWord').value} : {hex:hlHex(card.side).slice(1).toUpperCase()};
+    const un=String(+$('unread').value*2);
+    const cp=citeParts(card.cite);
+    let o=`<w:p><w:pPr><w:pStyle w:val="Heading4"/></w:pPr>${card.tag.map(p=>run(p.t,{b:true,u:p.u,sz:26})).join('')}</w:p>`;
+    if(card.citeText) o+=`<w:p>${run(card.citeText,{sz:22})}</w:p>`;
+    else o+=`<w:p>${run(cp.first+' ',{sz:22})}${run(cp.last+',',{b:true,sz:26})}${run(' '+cp.yfront,{sz:22})}${run(cp.yy,{b:true,sz:26})}${run(cp.rest,{sz:22})}</w:p>`;
+    for(const p of paragraphsOf(card.tokens)){
+      o+='<w:p>'+p.map(r=>run(r.t, r.lv===0?{sz:un}: r.lv===1?{u:true,sz:22}: r.lv===2?{u:true,sz:22,hl}:{b:true,u:true,sz:22,hl})).join('')+'</w:p>';
+    }
+    return o+'<w:p/>';
+  }
+  async function buildDocx(list){
+    const zip=new JSZip();
+    zip.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>');
+    zip.file('_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+    zip.file('word/_rels/document.xml.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+    zip.file('word/styles.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri" w:eastAsia="Calibri"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style><w:style w:type="paragraph" w:styleId="Heading4"><w:name w:val="heading 4"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="40" w:after="0"/><w:outlineLvl w:val="3"/></w:pPr><w:rPr><w:b/><w:bCs/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr></w:style></w:styles>');
+    zip.file('word/document.xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${list.map(cardDocx).join('')}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body></w:document>`);
+    return zip.generateAsync({type:'blob'});
+  }
+  $('dlDocx').onclick=async()=>{
+    const dl = window.claude ? await claude.use('downloads') : null;
+    if(!dl){ toast('Downloads are not available in this view'); return; }
+    try{
+      const blob=await buildDocx(cards);
+      const name=(cards.length===1 ? (cards[0].cite.last||'card')+' '+(cards[0].cite.year||'') : 'Cut cards '+new Date().toLocaleDateString().replace(/\//g,'-')).trim()+'.docx';
+      await dl.save({filename:name, data:blob});
+      toast('Saved');
+    }catch(e){ if(e&&e.code!=='declined') toast('Could not save: '+(e.message||e.code)); }
+  };
+  window.__cc={buildDocx,verifyAndMap,cards:()=>cards,setCards:c=>{cards=c;renderAll();},cardHTML};
+
+  // ---------- ui helpers ----------
+  function status(s){ $('status').textContent=s; }
+  function showErr(s){ $('err').textContent=s; $('err').style.display='block'; }
+  function hideErr(){ $('err').style.display='none'; }
+  let tt; function toast(s){ const t=$('toast'); t.textContent=s; t.classList.add('show'); clearTimeout(tt); tt=setTimeout(()=>t.classList.remove('show'),2200); }
+  $('cutBtn').onclick=cut;
+  $('initials').addEventListener('change',()=>{});
+  applyColors();
+})();
+</script>
+</body>
+</html>
