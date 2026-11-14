@@ -41,7 +41,8 @@ export function CxPrepPage() {
   /** Use cards already imported into the library (e.g. an opponent's file). */
   const addFromLibrary = () => {
     const topicId = activeTopic()?.id;
-    const theirs = db.cards.list.value.filter((c) => c.topicId === topicId && c.origin === 'import').slice(0, 25);
+    // Cards from "Import many files" (a camp library) are not an opponent's evidence, so they are left out.
+    const theirs = db.cards.list.value.filter((c) => c.topicId === topicId && c.origin === 'import' && !c.pack).slice(0, 25);
     if (!theirs.length) return toast('No imported cards in your library. Import their .docx on the Library page, or paste the cards here.', { kind: 'error' });
     const text = theirs.map((c) => `${tagText(c.tag)}\n${cardCiteText(c)}\n${c.text}`).join('\n\n');
     setCards((c) => (c.trim() ? `${c.trim()}\n\n${text}` : text));

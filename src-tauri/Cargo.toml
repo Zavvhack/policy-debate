@@ -1,6 +1,6 @@
 [package]
 name = "policy-debate"
-version = "1.0.0"
+version = "1.1.0"
 description = "Policy Debate: prep and in-round tools for policy debaters"
 edition = "2021"
 publish = false

@@ -273,7 +273,10 @@ export class Collection<T extends BaseDoc> {
    * @param delayMs wait this long for further changes before writing (use for typing)
    */
   put(doc: T, delayMs = 0): T {
-    const saved: T = { ...doc, updatedAt: now(), createdAt: doc.createdAt || now() };
+    const t = now();
+    const createdAt = doc.createdAt || t;
+    // Always later than createdAt, so "changed since it was made" is never a tie (see untouchedPackCardIds).
+    const saved: T = { ...doc, createdAt, updatedAt: Math.max(t, createdAt + 1) };
     const existed = this.map.has(saved.id);
     this.map.set(saved.id, saved);
     this.list.value = existed ? this.list.value.map((d) => (d.id === saved.id ? saved : d)) : [...this.list.value, saved];
@@ -292,6 +295,46 @@ export class Collection<T extends BaseDoc> {
       },
     );
     return saved;
+  }
+
+  /**
+   * Save many new or changed documents at once, in one database step, and wait
+   * until they are on disk. Used for big imports: saving thousands of cards
+   * one by one would take minutes and redraw every screen thousands of times.
+   * Unlike `put`, the documents' own `updatedAt` is kept.
+   */
+  putMany(docs: readonly T[]): Promise<void> {
+    if (!docs.length) return Promise.resolve();
+    const fresh: T[] = [];
+    const changed = new Map<string, T>();
+    for (const doc of docs) {
+      const saved: T = { ...doc, updatedAt: doc.updatedAt || now(), createdAt: doc.createdAt || now() };
+      if (this.map.has(saved.id)) changed.set(saved.id, saved);
+      else fresh.push(saved);
+      this.map.set(saved.id, saved);
+    }
+    this.list.value = [...(changed.size ? this.list.value.map((d) => changed.get(d.id) ?? d) : this.list.value), ...fresh];
+    changeCount++;
+    bumpPending(1);
+    const name = this.name;
+    const saved = [...changed.values(), ...fresh];
+    return runWrite(() => be().putMany(name, saved));
+  }
+
+  /**
+   * Delete many documents for good, in one step, WITHOUT the trash. Only for
+   * things that can be brought back another way (cards from "Import many
+   * files" can be imported again from the same files).
+   */
+  removeManyForGood(ids: readonly string[]): Promise<void> {
+    const gone = new Set(ids.filter((id) => this.map.has(id)));
+    if (!gone.size) return Promise.resolve();
+    for (const id of gone) this.map.delete(id);
+    this.list.value = this.list.value.filter((d) => !gone.has(d.id));
+    changeCount++;
+    bumpPending(1);
+    const name = this.name;
+    return runWrite(() => be().deleteMany(name, [...gone]));
   }
 
   /** Delete a document. It is kept in the trash so it can be restored. */
@@ -452,10 +495,33 @@ export async function initStore(useBackend?: Backend): Promise<void> {
 // Backups
 // ---------------------------------------------------------------------------
 
-/** Everything, as one object. */
-export function currentSnapshot(): Snapshot {
+/**
+ * Cards from "Import many files" that the debater has not touched: not edited,
+ * and not used in a block or T file. The automatic backups leave these out (a
+ * camp library can be hundreds of megabytes, and copying it every five minutes
+ * would make the app stutter and fill the disk). The original files are their
+ * backup, and restoring a backup keeps them.
+ */
+export function untouchedPackCardIds(): Set<string> {
+  const used = new Set<string>();
+  for (const b of db.blocks.list.value) for (const it of b.items) if (it.kind === 'card') used.add(it.cardId);
+  for (const f of db.tfiles.list.value) for (const s of f.sections) if (s.cardId) used.add(s.cardId);
+  const ids = new Set<string>();
+  for (const c of db.cards.list.value) if (c.pack && c.updatedAt <= c.createdAt && !used.has(c.id)) ids.add(c.id);
+  return ids;
+}
+
+/**
+ * Everything, as one object.
+ * @param lean leave out untouched imported library cards (see `untouchedPackCardIds`); used by the automatic backups.
+ */
+export function currentSnapshot(lean = false): Snapshot {
   const data = emptyData() as unknown as Record<DataCollectionName, BaseDoc[]>;
   for (const name of DATA_COLLECTIONS) data[name] = collection(name).list.value;
+  if (lean) {
+    const skip = untouchedPackCardIds();
+    if (skip.size) data.cards = data.cards.filter((c) => !skip.has(c.id));
+  }
   return makeSnapshot(data as unknown as Snapshot['data'], settings.value, now(), __APP_VERSION__);
 }
 
@@ -476,7 +542,7 @@ export async function takeBackup(reason: string, force = false): Promise<boolean
   const store = backend;
   try {
     await flushWrites();
-    const json = JSON.stringify(currentSnapshot());
+    const json = JSON.stringify(currentSnapshot(true));
     const doc: BackupDoc = { id: newId(), createdAt: now(), reason, json, bytes: json.length };
     await store.put('backups', doc);
     backedUpAt = changeCount;
@@ -510,6 +576,10 @@ export async function restoreSnapshot(snapshot: Snapshot): Promise<void> {
   const contents: Partial<Record<CollectionName, { id: string }[]>> = {};
   const clean = {} as Record<DataCollectionName, BaseDoc[]>;
   for (const name of DATA_COLLECTIONS) clean[name] = repairList(name, snapshot.data[name] ?? []).docs;
+  // Automatic backups leave out untouched imported library cards, so restoring one keeps the ones you have now.
+  const inSnapshot = new Set(clean.cards.map((c) => c.id));
+  const keptPack = db.cards.list.value.filter((c) => c.pack && !inSnapshot.has(c.id));
+  clean.cards = [...clean.cards, ...keptPack];
   for (const name of DATA_COLLECTIONS) contents[name] = clean[name];
   await be().replaceAll(contents);
   for (const name of DATA_COLLECTIONS) collection(name).hydrate(clean[name]);

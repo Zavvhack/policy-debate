@@ -119,6 +119,8 @@ function repairCard(d: Raw): Card | null {
   };
   if (citeRaw) card.citeRaw = citeRaw;
   else delete card.citeRaw;
+  if (typeof d.pack === 'string' && d.pack) card.pack = d.pack;
+  else delete card.pack;
   return card;
 }
 

@@ -3,6 +3,11 @@
 What changed in each version, newest first. Versions are numbered `major.minor.patch`:
 a new first number means something you rely on changed, a new middle number means new features, and a new last number means fixes only.
 
+## 1.1.0
+
+- **Import many files at once.** On the Library page, **Import many files…** takes a `.zip`, a whole folder, or lots of `.docx` files in one go. A file named like `Econ DA - Neg - DDI 2026.docx` gets its side from the name (Aff, Neg, or General for both), and the argument and its folder become labels you can filter by. Files already imported are skipped, so it is safe to run again, and **Remove them…** in the same window takes an import back out.
+- **Big libraries stay quick.** Tens of thousands of cards load in a few seconds, search waits until you pause typing, and the automatic snapshots leave out imported library cards you have not touched (the original files are their backup), so they stay small. Cards you edit or use in a block are backed up as usual, and **Download a backup file** still has everything.
+
 ## 1.0.0
 
 The first public release.

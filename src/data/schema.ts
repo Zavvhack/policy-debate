@@ -127,6 +127,14 @@ export interface Card extends BaseDoc {
   /** For definitions: the word or phrase being defined. */
   term: string;
   notes: string;
+  /**
+   * For cards brought in with "Import many files": the file they came from:
+   * its folder and name, without ".docx" ("Disadvantages/Econ DA - Neg - DDI"). Used to skip files already imported and to
+   * remove a whole import at once. Such cards are left out of the automatic
+   * backups, because the original files are their backup; once you edit one,
+   * or use it in a block, it is backed up like any other card.
+   */
+  pack?: string;
 }
 
 /** The full text of an article a card was cut from. */

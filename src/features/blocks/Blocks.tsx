@@ -18,7 +18,7 @@ import { searchItems } from '../../core/search';
 import { activeTopic, db } from '../../data/store';
 import type { ArgCategory, Block, BlockItem, BlockTemplate, Card } from '../../data/schema';
 import { navigate } from '../../app/router';
-import { confirmDialog, Field, openDialog, Segmented, Select, TextArea, TextInput, toast } from '../../ui/kit';
+import { confirmDialog, Field, openDialog, Segmented, Select, TextArea, TextInput, toast, useDebounced } from '../../ui/kit';
 import { AiButton, AiDraftNote, AiSection, AiStatus, useAi } from '../ai/AiUi';
 import { CardBody } from '../cards/CardView';
 import { cardSearchFields, cardShortCite, copyItems, downloadDocx, highlightSide, knownLabels } from '../cards/cardService';
@@ -34,7 +34,8 @@ export function pickCard(filter?: (c: Card) => boolean): Promise<string | undefi
       const [q, setQ] = useState('');
       const topicId = activeTopic()?.id;
       const cards = db.cards.list.value.filter((c) => c.topicId === topicId && (!filter || filter(c)));
-      const shown = searchItems(cards, q, cardSearchFields).slice(0, 60);
+      const settledQ = useDebounced(q, cards.length > 3000 ? 250 : 0);
+      const shown = useMemo(() => searchItems(cards, settledQ, cardSearchFields).slice(0, 60), [cards.length, settledQ]);
       return (
         <>
           <h2 class="dialog-title">Choose a card from your library</h2>

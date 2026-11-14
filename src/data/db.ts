@@ -20,7 +20,11 @@ export interface Backend {
   getAll<T>(store: CollectionName): Promise<T[]>;
   get<T>(store: CollectionName, id: string): Promise<T | undefined>;
   put<T extends { id: string }>(store: CollectionName, doc: T): Promise<void>;
+  /** Save many documents in one all-or-nothing step (much faster than one at a time). */
+  putMany<T extends { id: string }>(store: CollectionName, docs: readonly T[]): Promise<void>;
   delete(store: CollectionName, id: string): Promise<void>;
+  /** Delete many documents in one all-or-nothing step. */
+  deleteMany(store: CollectionName, ids: readonly string[]): Promise<void>;
   /** Replace the entire contents of several stores in one all-or-nothing step. */
   replaceAll(contents: Partial<Record<CollectionName, { id: string }[]>>): Promise<void>;
   close(): void;
@@ -60,9 +64,25 @@ class IndexedDbBackend implements Backend {
     await txDone(tx);
   }
 
+  async putMany<T extends { id: string }>(store: CollectionName, docs: readonly T[]): Promise<void> {
+    if (!docs.length) return;
+    const tx = this.db.transaction(store, 'readwrite');
+    const os = tx.objectStore(store);
+    for (const doc of docs) os.put(doc);
+    await txDone(tx);
+  }
+
   async delete(store: CollectionName, id: string): Promise<void> {
     const tx = this.db.transaction(store, 'readwrite');
     tx.objectStore(store).delete(id);
+    await txDone(tx);
+  }
+
+  async deleteMany(store: CollectionName, ids: readonly string[]): Promise<void> {
+    if (!ids.length) return;
+    const tx = this.db.transaction(store, 'readwrite');
+    const os = tx.objectStore(store);
+    for (const id of ids) os.delete(id);
     await txDone(tx);
   }
 
@@ -105,8 +125,14 @@ export class MemoryBackend implements Backend {
   async put<T extends { id: string }>(store: CollectionName, doc: T): Promise<void> {
     this.store(store).set(doc.id, structuredClone(doc));
   }
+  async putMany<T extends { id: string }>(store: CollectionName, docs: readonly T[]): Promise<void> {
+    for (const d of docs) this.store(store).set(d.id, structuredClone(d));
+  }
   async delete(store: CollectionName, id: string): Promise<void> {
     this.store(store).delete(id);
+  }
+  async deleteMany(store: CollectionName, ids: readonly string[]): Promise<void> {
+    for (const id of ids) this.store(store).delete(id);
   }
   async replaceAll(contents: Partial<Record<CollectionName, { id: string }[]>>): Promise<void> {
     for (const [name, docs] of Object.entries(contents) as [CollectionName, { id: string }[]][]) {

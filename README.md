@@ -16,7 +16,7 @@ A free app for policy debaters: **flow, time, and read your files during a round
 **Before a round**
 
 - **Card cutter.** Paste an article or open a PDF or Word file, mark what you will read, and save it as a card in standard format. The card's words are copied from the source and can never be changed.
-- **Library.** Search everything you have cut. Export to Word (works with Verbatim) or copy into Google Docs.
+- **Library.** Search everything you have cut. Bring in a whole camp library at once (a `.zip` or folder of Verbatim files) with **Import many files**. Export to Word (works with Verbatim) or copy into Google Docs.
 - **Blocks and templates**, **topicality** shells and answers, timed **rebuttal practice**, and **scouting** notes.
 
 **The rule the app is built around: no AI during a round, ever.** Starting a round switches every AI feature off inside the code, not just on screen, and shows a "Round Mode — AI off" banner until you end the round.

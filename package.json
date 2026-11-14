@@ -1,7 +1,7 @@
 {
   "name": "policy-debate",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Policy Debate: prep and in-round tools for high school policy debaters",
   "type": "module",
   "scripts": {

@@ -1,12 +1,13 @@
 // The library: every card for the active topic, searchable.
 
-import { useMemo, useState } from 'preact/hooks';
+import { useMemo, useRef, useState } from 'preact/hooks';
 import { tagText } from '../../core/cards/text';
 import { searchItems } from '../../core/search';
 import { activeTopic, db } from '../../data/store';
 import type { CardSide } from '../../data/schema';
 import { navigate } from '../../app/router';
-import { confirmDialog, openDialog, Segmented, Select, TextInput, toast, Field } from '../../ui/kit';
+import { confirmDialog, openDialog, Segmented, Select, TextInput, toast, Field, useDebounced } from '../../ui/kit';
+import { collectFiles, importedPacks, importMany, removeImportedLibrary, type BulkProgress, type BulkResult } from './bulkImport';
 import { blockSearchFields, blockTitle, tFileSearchFields, tFileSide, tFileTitle } from '../blocks/blockService';
 import { CardEditor } from '../cards/CardView';
 import {
@@ -78,6 +79,176 @@ function askImportDetails(fileName: string, count: number, analytics: number): P
   });
 }
 
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n.toLocaleString()} ${n === 1 ? one : many}`;
+}
+
+/** "Import many files": a whole folder or .zip of evidence files at once. */
+function openBulkImport(): void {
+  void openDialog<void>((close) => {
+    const Body = () => {
+      const [unknownSide, setUnknownSide] = useState<CardSide>('both');
+      const [stage, setStage] = useState<'pick' | 'opening' | 'running' | 'done'>('pick');
+      const [progress, setProgress] = useState<BulkProgress | null>(null);
+      const [result, setResult] = useState<BulkResult | null>(null);
+      const [ignored, setIgnored] = useState(0);
+      const stop = useRef(false);
+      const packs = importedPacks();
+      const packCards = [...packs.values()].reduce((a, b) => a + b, 0);
+
+      const start = async (e: Event) => {
+        const input = e.target as HTMLInputElement;
+        const picked = [...(input.files ?? [])];
+        input.value = '';
+        if (!picked.length) return;
+        stop.current = false;
+        setStage('opening');
+        try {
+          const { files, ignored: skippedFiles } = await collectFiles(picked);
+          setIgnored(skippedFiles);
+          if (!files.length) {
+            setStage('pick');
+            toast('No .docx files were found in what you picked.', { kind: 'error', ms: 7000 });
+            return;
+          }
+          setStage('running');
+          const res = await importMany(files, { unknownSide, onProgress: setProgress, cancelled: () => stop.current });
+          setResult(res);
+          setStage('done');
+        } catch (err) {
+          setStage('pick');
+          toast(err instanceof Error ? err.message : String(err), { kind: 'error', ms: 9000 });
+        }
+      };
+
+      const removeAll = async () => {
+        const yes = await confirmDialog({
+          title: `Remove ${plural(packCards, 'imported card')}?`,
+          body: 'This removes the cards that came in with "Import many files", so you can import them again. They do not go to the trash, but you can bring them back by importing the same files. Cards you edited or put in a block are kept.',
+          confirm: 'Remove them',
+          danger: true,
+        });
+        if (!yes) return;
+        const { removed, kept } = await removeImportedLibrary();
+        toast(`Removed ${plural(removed, 'card')}.${kept ? ` Kept ${plural(kept, 'card')} you edited or used in a block.` : ''}`, { kind: 'success', ms: 7000 });
+        close();
+      };
+
+      const busy = stage === 'opening' || stage === 'running';
+      const pct = progress && progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+      return (
+        <>
+          <h2 class="dialog-title">Import many files</h2>
+          <div class="dialog-body form-grid">
+            {stage === 'pick' && (
+              <>
+                <p>
+                  Pick a <strong>.zip</strong> file, a whole <strong>folder</strong>, or lots of <strong>.docx</strong> files at once. Every card in them is added to the
+                  library.
+                </p>
+                <p class="muted">
+                  A file named like <em>Econ DA - Neg - DDI 2026.docx</em> gets its side from the name (Aff, Neg, or General for both), and the argument and the folder it
+                  is in become labels you can filter by. Files you already imported are skipped, so it is safe to run again.
+                </p>
+                <Field label="Side for files whose name does not say" group>
+                  <Segmented
+                    ariaLabel="Side for files whose name does not say"
+                    value={unknownSide}
+                    onChange={setUnknownSide}
+                    options={[
+                      { value: 'neg', label: 'Neg', class: 'seg-neg' },
+                      { value: 'aff', label: 'Aff', class: 'seg-aff' },
+                      { value: 'both', label: 'Both' },
+                    ]}
+                  />
+                </Field>
+                <div class="row-tight">
+                  <label class="btn btn-primary">
+                    Choose a .zip or .docx files…
+                    <input type="file" class="sr-only" accept=".zip,.docx" multiple onChange={start} data-testid="bulk-files" />
+                  </label>
+                  <label class="btn">
+                    Choose a folder…
+                    <input type="file" class="sr-only" {...{ webkitdirectory: '' }} multiple onChange={start} data-testid="bulk-folder" />
+                  </label>
+                </div>
+                {packCards > 0 && (
+                  <p class="muted">
+                    Already imported: {plural(packs.size, 'file')}, {plural(packCards, 'card')}.{' '}
+                    <button type="button" class="btn btn-quiet" onClick={removeAll}>
+                      Remove them…
+                    </button>
+                  </p>
+                )}
+              </>
+            )}
+            {stage === 'opening' && <p>Opening what you picked…</p>}
+            {stage === 'running' && progress && (
+              <>
+                <p>
+                  File {Math.min(progress.done + 1, progress.total).toLocaleString()} of {progress.total.toLocaleString()} · {plural(progress.cards, 'card')} so far
+                </p>
+                <progress class="bulk-progress" max={100} value={pct} aria-label="Import progress" />
+                <p class="muted bulk-current">{progress.current}</p>
+                <p class="muted">You can keep this open in the background. Big libraries take a few minutes.</p>
+              </>
+            )}
+            {stage === 'done' && result && (
+              <div data-testid="bulk-result">
+                <p>
+                  <strong>
+                    {result.cancelled ? 'Stopped. ' : 'Done. '}
+                    Added {plural(result.cards, 'card')} from {plural(result.files, 'file')}.
+                  </strong>
+                </p>
+                {result.skipped.length > 0 && <p class="muted">{plural(result.skipped.length, 'file was', 'files were')} already in the library, so skipped.</p>}
+                {ignored > 0 && <p class="muted">{plural(ignored, 'file')} that {ignored === 1 ? 'is not a .docx was' : 'are not .docx were'} ignored.</p>}
+                {result.empty.length > 0 && (
+                  <details>
+                    <summary>{plural(result.empty.length, 'file')} had no cards (only headings or notes)</summary>
+                    <ul class="bulk-list">
+                      {result.empty.map((n) => (
+                        <li key={n}>{n}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+                {result.failed.length > 0 && (
+                  <details open>
+                    <summary>{plural(result.failed.length, 'file')} could not be read</summary>
+                    <ul class="bulk-list">
+                      {result.failed.map((f) => (
+                        <li key={f.name}>
+                          {f.name}: {f.error}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+                <p class="muted">
+                  Imported cards are marked "not checked against a source". Use the Label menu to see one argument or folder at a time.
+                </p>
+              </div>
+            )}
+          </div>
+          <div class="dialog-actions">
+            {stage === 'running' ? (
+              <button type="button" class="btn" onClick={() => (stop.current = true)}>
+                Stop
+              </button>
+            ) : (
+              <button type="button" class={`btn ${stage === 'done' ? 'btn-primary' : ''}`} disabled={busy} onClick={() => close()}>
+                {stage === 'done' ? 'Done' : 'Cancel'}
+              </button>
+            )}
+          </div>
+        </>
+      );
+    };
+    return <Body />;
+  }, false);
+}
+
 export function LibraryPage({ openId }: { openId?: string }) {
   const topic = activeTopic();
   const [query, setQuery] = useState('');
@@ -88,25 +259,27 @@ export function LibraryPage({ openId }: { openId?: string }) {
 
   const all = db.cards.list.value;
   const mine = useMemo(() => all.filter((c) => c.topicId === topic?.id).sort((a, b) => b.createdAt - a.createdAt), [all, topic?.id]);
+  // A big library is searched once you pause typing, so typing never lags.
+  const settledQuery = useDebounced(query, mine.length > 3000 ? 250 : 0);
   const shown = useMemo(() => {
     const filtered = mine.filter(
       (c) => (side === 'all' || c.side === side || c.side === 'both') && (kind === 'all' || c.kind === kind) && (!label || c.labels.includes(label)),
     );
-    return searchItems(filtered, query, cardSearchFields);
-  }, [mine, side, kind, label, query]);
+    return searchItems(filtered, settledQuery, cardSearchFields);
+  }, [mine, side, kind, label, settledQuery]);
   // The same search also looks through blocks and T files, so the library is one place to find anything.
   const allBlocks = db.blocks.list.value;
   const allTFiles = db.tfiles.list.value;
   const others = useMemo(() => {
-    if (!query.trim()) return [];
-    const blocks = searchItems(allBlocks.filter((b) => b.topicId === topic?.id && (side === 'all' || b.side === side)), query, blockSearchFields).map((b) => ({
+    if (!settledQuery.trim()) return [];
+    const blocks = searchItems(allBlocks.filter((b) => b.topicId === topic?.id && (side === 'all' || b.side === side)), settledQuery, blockSearchFields).map((b) => ({
       key: b.id,
       kind: 'Block',
       title: blockTitle(b),
       href: `#/blocks/${b.id}`,
       side: b.side,
     }));
-    const tfiles = searchItems(allTFiles.filter((f) => f.topicId === topic?.id && (side === 'all' || tFileSide(f) === side)), query, tFileSearchFields).map((f) => ({
+    const tfiles = searchItems(allTFiles.filter((f) => f.topicId === topic?.id && (side === 'all' || tFileSide(f) === side)), settledQuery, tFileSearchFields).map((f) => ({
       key: f.id,
       kind: 'T file',
       title: tFileTitle(f),
@@ -114,7 +287,7 @@ export function LibraryPage({ openId }: { openId?: string }) {
       side: tFileSide(f),
     }));
     return [...blocks, ...tfiles].slice(0, 30);
-  }, [allBlocks, allTFiles, topic?.id, side, query]);
+  }, [allBlocks, allTFiles, topic?.id, side, settledQuery]);
   const open = mine.find((c) => c.id === openId);
   const labels = knownLabels();
   const chosen = shown.filter((c) => picked.has(c.id));
@@ -161,7 +334,7 @@ export function LibraryPage({ openId }: { openId?: string }) {
         <div>
           <h1>Library</h1>
           <p class="lead">
-            {mine.length} card{mine.length === 1 ? '' : 's'} for {topic?.name ?? 'this topic'}. Searching here also finds your blocks and T files.
+            {mine.length.toLocaleString()} card{mine.length === 1 ? '' : 's'} for {topic?.name ?? 'this topic'}. Searching here also finds your blocks and T files.
           </p>
         </div>
         <div class="row-tight">
@@ -172,6 +345,9 @@ export function LibraryPage({ openId }: { openId?: string }) {
             Import a .docx file…
             <input type="file" class="sr-only" accept=".docx" onChange={importFile} />
           </label>
+          <button class="btn" onClick={openBulkImport}>
+            Import many files…
+          </button>
         </div>
       </div>
 
@@ -217,7 +393,7 @@ export function LibraryPage({ openId }: { openId?: string }) {
 
       <div class="library-grid">
         <ul class="list library-list" aria-label="Cards">
-          {!shown.length && !others.length && <li class="empty">{mine.length ? 'Nothing matches.' : 'No cards yet. Cut one, or import a .docx evidence file.'}</li>}
+          {!shown.length && !others.length && <li class="empty">{mine.length ? 'Nothing matches.' : 'No cards yet. Cut one, import a .docx evidence file, or use "Import many files" for a whole folder or .zip.'}</li>}
           {shown.slice(0, 400).map((c) => (
             <li key={c.id} class={`list-row ${c.id === openId ? 'is-open' : ''}`}>
               <input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} aria-label={`Select ${tagText(c.tag) || 'card'}`} />

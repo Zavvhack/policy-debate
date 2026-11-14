@@ -2,9 +2,27 @@
 
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { newId } from '../core/ids';
 import { platform } from '../platform';
+
+/**
+ * `value`, but only once it has stopped changing for `ms`. Used for searching
+ * a big library: searching tens of thousands of cards on every keystroke would
+ * make typing lag. With `ms` 0 it follows `value` straight away.
+ */
+export function useDebounced<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    if (ms <= 0) {
+      setSettled(value);
+      return;
+    }
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return ms <= 0 ? value : settled;
+}
 
 // ---------------------------------------------------------------------------
 // Toasts: short messages at the bottom of the screen

@@ -11,7 +11,7 @@ import type { DocItem } from '../../core/docx/write';
 import { searchItems } from '../../core/search';
 import { db } from '../../data/store';
 import type { Round } from '../../data/schema';
-import { Segmented, TextInput } from '../../ui/kit';
+import { Segmented, TextInput, useDebounced } from '../../ui/kit';
 import { CardBody } from '../cards/CardView';
 import { cardSearchFields, cardShortCite, cardsToItems, copyItems, downloadDocx, highlightSide } from '../cards/cardService';
 import { roundDocSources, type RoundDocEntry } from './roundDocSources';
@@ -49,12 +49,15 @@ export function RoundDocs({ round, onFills }: { round: Round; onFills: (fills: R
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cards, blocks, tfiles, round.topicId, round.fills]);
 
+  // With a big library, search once typing pauses so the speech doc never lags.
+  const settledQuery = useDebounced(query, entries.length > 3000 ? 200 : 0);
   const shown = useMemo(() => {
+    const query = settledQuery;
     const filtered = entries.filter((e) => filter === 'all' || e.type === filter);
     // With no search, put this round's own side first.
     const ordered = query.trim() ? filtered : [...filtered].sort((a, b) => Number(b.side === round.meta.side) - Number(a.side === round.meta.side));
     return searchItems(ordered, query, (e) => e.fields).slice(0, 200);
-  }, [entries, filter, query, round.meta.side]);
+  }, [entries, filter, settledQuery, round.meta.side]);
 
   const open = entries.find((e) => e.key === openKey) ?? null;
   const speechEntries = speech.map((k) => entries.find((e) => e.key === k)).filter((e): e is RoundDocEntry => !!e);
